@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest -v
+
+      - name: Build Docker image
+        run: docker build -t churn-api .
+
+      - name: Run container
+        run: docker run -d -p 8000:8000 --name churn-api churn-api
+
+      - name: Wait for API
+        run: |
+          for i in $(seq 1 15); do
+            curl -sf http://localhost:8000/health && break
+            sleep 2
+          done
+
+      - name: Verify prediction endpoint
+        run: |
+          curl -sf -X POST http://localhost:8000/predict \
+            -H "Content-Type: application/json" \
+            -d @sample_request.json | tee response.json
+          grep -q "churn_probability" response.json
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f churn-api
